@@ -1,0 +1,109 @@
+rules_version = '2';
+
+// Правила безопасности NEXUS store. Роли: user (по умолчанию) и admin.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    // Bootstrap: первый администратор определяется по e-mail (дублируется в js/core/config.js)
+    function bootstrapAdmin() {
+      return signedIn() && request.auth.token.email in ['admin@nexus-store.kz'];
+    }
+    function isAdmin() {
+      return bootstrapAdmin() || (signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function validRating(d) { return d.rating is int && d.rating >= 1 && d.rating <= 5 && d.text is string && d.text.size() <= 2000; }
+
+    // ---------- Пользователи ----------
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid)
+        && request.resource.data.email == request.auth.token.email
+        && (request.resource.data.role == 'user' || (request.resource.data.role == 'admin' && bootstrapAdmin()));
+      // пользователь не может сам поменять себе роль
+      allow update: if isAdmin()
+        || (isOwner(uid) && !changed().hasAny(['role', 'email', 'uid', 'createdAt']));
+      allow delete: if isAdmin();
+
+      // Избранное
+      match /favorites/{productId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ---------- Каталог ----------
+    match /products/{productId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && (
+        // списание остатка при оформлении заказа
+        (changed().hasOnly(['stock', 'salesCount'])
+          && request.resource.data.stock >= 0
+          && request.resource.data.stock < resource.data.stock
+          && request.resource.data.salesCount > resource.data.salesCount)
+        // пересчёт денормализованного рейтинга при отзыве
+        || (changed().hasOnly(['ratingSum', 'ratingCount', 'ratingAvg'])
+          && request.resource.data.ratingCount >= 0
+          && request.resource.data.ratingAvg >= 0 && request.resource.data.ratingAvg <= 5)
+      ));
+
+      match /details/{docId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    // ---------- Корзина (активные действия) ----------
+    match /carts/{uid}/items/{productId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.qty is int
+        && request.resource.data.qty >= 1 && request.resource.data.qty <= 99;
+    }
+
+    // ---------- Заказы (история действий) ----------
+    match /orders/{orderId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'new'
+        && request.resource.data.total is number
+        && request.resource.data.items.size() > 0;
+      // пользователь может только отменить свой новый заказ; статусы меняет админ
+      allow update: if isAdmin() || (signedIn()
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'new'
+        && request.resource.data.status == 'cancelled'
+        && changed().hasOnly(['status', 'statusHistory', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Отзывы ----------
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && reviewId == request.resource.data.productId + '_' + request.auth.uid
+        && validRating(request.resource.data);
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.productId == resource.data.productId
+        && validRating(request.resource.data);
+      allow delete: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ---------- Промокоды ----------
+    match /promocodes/{code} {
+      allow get: if signedIn();
+      allow list, create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn()
+        && changed().hasOnly(['uses'])
+        && request.resource.data.uses == resource.data.uses + 1);
+    }
+  }
+}
