@@ -1,0 +1,15 @@
+{
+  "name": "NEXUS store — интернет-магазин электроники",
+  "short_name": "NEXUS",
+  "description": "Интернет-магазин электроники на Firebase Firestore",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e1017",
+  "theme_color": "#5b4cf0",
+  "lang": "ru",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

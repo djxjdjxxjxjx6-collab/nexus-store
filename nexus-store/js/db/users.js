@@ -44,26 +44,24 @@ export const togglePromo = (code, active) => updateDoc(doc(db, "promocodes", cod
 export const deletePromo = (code) => deleteDoc(doc(db, "promocodes", code));
 
 /* ---------- Статистика: агрегатные запросы count()/sum() без выкачивания документов ---------- */
+const safeCount = (q) => getCountFromServer(q).then(r => r.data().count).catch(() => null);
+
 export async function getStats() {
   const orders = collection(db, "orders");
   const products = collection(db, "products");
-  const [u, p, o, rev, outOfStock, byStatus] = await Promise.all([
-    getCountFromServer(usersCol),
-    getCountFromServer(products),
-    getCountFromServer(orders),
-    getAggregateFromServer(query(orders, where("status", "in", ["new", "processing", "shipped", "delivered"])), { revenue: sum("total") }),
-    getCountFromServer(query(products, where("stock", "==", 0))),
-    Promise.all(["new", "processing", "shipped", "delivered", "cancelled"].map(async st =>
-      [st, (await getCountFromServer(query(orders, where("status", "==", st)))).data().count]))
+  const paid = ["new", "processing", "shipped", "delivered"];
+  const revenueQ = query(orders, where("status", "in", paid));
+  const [users, productsN, ordersN, outOfStock, byStatus, revenue] = await Promise.all([
+    safeCount(usersCol),
+    safeCount(products),
+    safeCount(orders),
+    safeCount(query(products, where("stock", "==", 0))),
+    Promise.all(["new", "processing", "shipped", "delivered", "cancelled"].map(async st => [st, await safeCount(query(orders, where("status", "==", st)))])),
+    // sum() требует составной индекс (status, total); если его нет — считаем на клиенте
+    getAggregateFromServer(revenueQ, { revenue: sum("total") }).then(r => r.data().revenue || 0)
+      .catch(async () => (await getDocs(query(revenueQ, limit(1000)))).docs.reduce((a, d) => a + (d.data().total || 0), 0))
   ]);
-  return {
-    users: u.data().count,
-    products: p.data().count,
-    orders: o.data().count,
-    revenue: rev.data().revenue || 0,
-    outOfStock: outOfStock.data().count,
-    byStatus: Object.fromEntries(byStatus)
-  };
+  return { users, products: productsN, orders: ordersN, revenue, outOfStock, byStatus: Object.fromEntries(byStatus) };
 }
 
 export async function getTopProducts(n = 5) {

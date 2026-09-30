@@ -150,7 +150,8 @@ function showOrder(o) {
     <p class="small">${esc(d.name)} · ${esc(d.phone)}<br>${d.method === "pickup" ? "Самовывоз" : "Курьер"}: ${esc(d.city)}, ${esc(d.address)}<br>Оплата: ${d.payment === "cash" ? "наличными" : "картой"}${d.comment ? `<br>Комментарий: ${esc(d.comment)}` : ""}</p>
     <h4>История статусов</h4>
     ${(o.statusHistory || []).map(h => `<div class="row small" style="margin:4px 0">${statusBadge(h.status)} <span class="muted">${fmtDate(h.at)}</span></div>`).join("")}
-  `, { wide: true });
+    <div class="modal__actions no-print"><button class="btn btn--ghost" data-print>🖨 Распечатать</button><button class="btn btn--primary" data-close>Закрыть</button></div>
+  `, { wide: true }).el.querySelector("[data-print]").onclick = () => window.print();
 }
 
 async function repeatOrder(o) {

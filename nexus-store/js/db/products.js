@@ -32,11 +32,19 @@ const mapDoc = (d) => ({ id: d.id, ...d.data() });
  * При поиске используется array-contains по searchKeywords (индекс по одному полю, без orderBy),
  * а сортировка результатов выполняется на клиенте — это экономит десятки составных индексов.
  */
-function buildQuery({ category, onSale, search, sort }, after = null, size = PAGE_SIZE, forceClient = false) {
+/** Диапазон цен активен? При диапазоне сортировка возможна только по цене (ограничение Firestore). */
+export const hasPriceRange = ({ minPrice, maxPrice }) => Number(minPrice) > 0 || Number(maxPrice) > 0;
+
+function buildQuery({ category, onSale, search, sort, minPrice, maxPrice }, after = null, size = PAGE_SIZE, forceClient = false) {
   const c = [];
   if (category) c.push(where("category", "==", category));
   if (onSale) c.push(where("onSale", "==", true));
   const terms = normalizeSearch(search);
+  const ranged = hasPriceRange({ minPrice, maxPrice });
+  const priceFilters = () => {
+    if (Number(minPrice) > 0) c.push(where("price", ">=", Number(minPrice)));
+    if (Number(maxPrice) > 0) c.push(where("price", "<=", Number(maxPrice)));
+  };
   if (terms.length) {
     // берём самое длинное слово — оно самое селективное
     const term = [...terms].sort((a, b) => b.length - a.length)[0].slice(0, 15);
@@ -50,18 +58,25 @@ function buildQuery({ category, onSale, search, sort }, after = null, size = PAG
     c.push(limit(100));
     return { q: query(productsCol, ...c), clientSide: true, terms };
   }
-  const s = SORTS.find(x => x.id === sort) || SORTS[0];
+  let s = SORTS.find(x => x.id === sort) || SORTS[0];
+  if (ranged) {
+    // неравенство по price => первая сортировка обязана быть по price
+    if (s.field !== "price") s = SORTS.find(x => x.id === "price_asc");
+    priceFilters();
+  }
   c.push(orderBy(s.field, s.dir));
   if (after) c.push(startAfter(after));
   c.push(limit(size));
   return { q: query(productsCol, ...c), clientSide: false, terms };
 }
 
-function clientProcess(items, { category, onSale, sort }, terms) {
+function clientProcess(items, { category, onSale, sort, minPrice, maxPrice }, terms) {
   const s = SORTS.find(x => x.id === sort) || SORTS[0];
   let res = items.filter(p =>
     (!category || p.category === category) &&
     (!onSale || p.onSale) &&
+    (!(Number(minPrice) > 0) || p.price >= Number(minPrice)) &&
+    (!(Number(maxPrice) > 0) || p.price <= Number(maxPrice)) &&
     terms.every(t => (p.searchKeywords || []).some(k => k.startsWith(t.slice(0, 15))) ||
       (p.name || "").toLowerCase().includes(t)));
   const val = (p) => s.field === "createdAt" ? (p.createdAt?.seconds || 0) : (p[s.field] || 0);
@@ -111,10 +126,12 @@ export async function fetchCatalogPage(opts, lastDoc) {
 }
 
 /** Количество товаров по фильтру — агрегатный запрос count(), без загрузки документов. */
-export async function countCatalog({ category, onSale }) {
+export async function countCatalog({ category, onSale, minPrice, maxPrice }) {
   const c = [];
   if (category) c.push(where("category", "==", category));
   if (onSale) c.push(where("onSale", "==", true));
+  if (Number(minPrice) > 0) c.push(where("price", ">=", Number(minPrice)));
+  if (Number(maxPrice) > 0) c.push(where("price", "<=", Number(maxPrice)));
   const snap = await getCountFromServer(query(productsCol, ...c));
   return snap.data().count;
 }
@@ -210,3 +227,25 @@ export async function deleteProduct(id) {
 }
 
 export { deleteDoc };
+
+/** Хиты продаж для главной (индекс по одному полю создаётся автоматически). */
+export async function fetchBestsellers(n = 10) {
+  const snap = await getDocs(query(productsCol, orderBy("salesCount", "desc"), limit(n)));
+  return snap.docs.map(mapDoc);
+}
+
+/** Быстрые подсказки для строки поиска в шапке. */
+export async function quickSearch(text, n = 6) {
+  const terms = normalizeSearch(text);
+  if (!terms.length) return [];
+  const term = [...terms].sort((a, b) => b.length - a.length)[0].slice(0, 15);
+  const snap = await getDocs(query(productsCol, where("searchKeywords", "array-contains", term), limit(20)));
+  return clientProcess(snap.docs.map(mapDoc), { sort: "popular" }, terms).slice(0, n);
+}
+
+/** Количество товаров в каждой категории — параллельные count()-агрегации. */
+export async function countByCategory(ids) {
+  const res = await Promise.all(ids.map(id => getCountFromServer(query(productsCol, where("category", "==", id)))
+    .then(s => [id, s.data().count]).catch(() => [id, null])));
+  return Object.fromEntries(res);
+}

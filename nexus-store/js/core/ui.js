@@ -1,5 +1,6 @@
 // UI-утилиты: шапка, тосты, модальные окна, карточки товаров, форматирование
-import { STORE_NAME, CURRENCY, categoryById, ORDER_STATUSES } from "./config.js";
+import { STORE_NAME, CURRENCY, categoryById, ORDER_STATUSES, CATEGORIES } from "./config.js";
+import { subscribeMyOrders } from "../db/orders.js";
 import { onSession, isAdmin, logout } from "./session.js";
 import { db } from "./firebase.js";
 import { collection, onSnapshot } from "../sdk/firestore.js";
@@ -194,76 +195,218 @@ export function pushRecent(p) {
 }
 export function getRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; } }
 
-/* ---------- Шапка и подвал ---------- */
-let cartUnsub = null;
-let cartUid = undefined;
+/* ---------- Шапка, подвал, мобильная навигация ---------- */
+let cartUnsub = null, cartUid = undefined;
+let ordersUnsub = null, ordersUid = undefined;
+const SEEN_KEY = "nexus-seen-status";
+const readSeen = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}"); } catch { return {}; } };
+const writeSeen = (m) => { try { localStorage.setItem(SEEN_KEY, JSON.stringify(m)); } catch {} };
 
 export function mountLayout(active = "") {
+  // ссылка «к содержимому» для клавиатуры и скринридеров
+  const skip = document.createElement("a");
+  skip.href = "#app"; skip.className = "skip-link"; skip.textContent = "Перейти к содержимому";
+  document.body.prepend(skip);
+
+  const promo = document.createElement("div");
+  promo.className = "topbar";
+  promo.innerHTML = `<div class="container topbar__inner"><span>🚚 Бесплатная доставка от 50 000 ₸ по Казахстану</span><span class="topbar__hide-sm">🎁 Промокод <b>WELCOME10</b> — −10% на первый заказ</span><span class="topbar__hide-sm">☎ +7 (727) 000-00-00</span></div>`;
+
   const header = document.createElement("header");
   header.className = "header";
   header.innerHTML = `
     <div class="container header__inner">
-      <a href="index.html" class="logo"><span class="logo__mark">N</span><span class="logo__text">${STORE_NAME}<small>store</small></span></a>
-      <form class="header__search" action="index.html" role="search">
-        <input type="search" name="q" placeholder="Поиск товаров…" autocomplete="off" aria-label="Поиск">
-        <button type="submit" aria-label="Найти">⌕</button>
+      <a href="index.html" class="logo" aria-label="NEXUS store — на главную"><span class="logo__mark">N</span><span class="logo__text">${STORE_NAME}<small>store</small></span></a>
+      <form class="header__search" action="index.html" role="search" autocomplete="off">
+        <span class="header__search-ico" aria-hidden="true">⌕</span>
+        <input type="search" name="q" placeholder="Найти смартфон, ноутбук, наушники…" aria-label="Поиск товаров" aria-autocomplete="list" aria-controls="suggest">
+        <kbd class="header__kbd" aria-hidden="true">/</kbd>
+        <div class="suggest" id="suggest" role="listbox" hidden></div>
       </form>
-      <nav class="nav" id="nav">
+      <nav class="nav" id="nav" aria-label="Основное меню">
         <a href="index.html" class="nav__link ${active === "catalog" ? "active" : ""}"><span class="nav__ico">🏬</span><span>Каталог</span></a>
         <a href="cart.html" class="nav__link ${active === "cart" ? "active" : ""}"><span class="nav__ico">🛒<b class="cart-count" id="cartCount" hidden>0</b></span><span>Корзина</span></a>
+        <div class="bell" id="bellWrap" hidden>
+          <button class="nav__link" id="bellBtn" aria-haspopup="true" aria-expanded="false"><span class="nav__ico">🔔<b class="cart-count" id="bellCount" hidden>0</b></span><span>Статусы</span></button>
+          <div class="bell__panel card" id="bellPanel" hidden></div>
+        </div>
         <a href="profile.html" class="nav__link ${active === "profile" ? "active" : ""}" id="navProfile"><span class="nav__ico">👤</span><span>Кабинет</span></a>
         <a href="admin.html" class="nav__link ${active === "admin" ? "active" : ""}" id="navAdmin" hidden><span class="nav__ico">🛠️</span><span>Админ</span></a>
         <a href="auth.html" class="nav__link" id="navLogin"><span class="nav__ico">🔑</span><span>Войти</span></a>
-        <button class="nav__link" id="navLogout" hidden><span class="nav__ico">🚪</span><span>Выйти</span></button>
-        <button class="nav__link theme-toggle" id="themeToggle" title="Сменить тему"><span class="nav__ico">🌓</span><span>Тема</span></button>
+        <button class="nav__link nav__link--desk" id="navLogout" hidden><span class="nav__ico">🚪</span><span>Выйти</span></button>
+        <button class="nav__link" id="themeToggle" title="Сменить тему" aria-label="Сменить тему"><span class="nav__ico" id="themeIco">🌙</span><span>Тема</span></button>
       </nav>
     </div>`;
   document.body.prepend(header);
+  document.body.prepend(promo);
+  document.body.prepend(skip);
 
   const q = qs("q");
   if (q) header.querySelector("input[name=q]").value = q;
+  initSuggest(header.querySelector(".header__search"));
 
   const footer = document.createElement("footer");
   footer.className = "footer";
   footer.innerHTML = `
+    <div class="container footer__features">
+      <div><b>🚚</b><div><strong>Быстрая доставка</strong><span>1–3 дня по Казахстану</span></div></div>
+      <div><b>🛡️</b><div><strong>Официальная гарантия</strong><span>12 месяцев на всё</span></div></div>
+      <div><b>↩️</b><div><strong>Лёгкий возврат</strong><span>14 дней без вопросов</span></div></div>
+      <div><b>💳</b><div><strong>Оплата при получении</strong><span>картой или наличными</span></div></div>
+    </div>
     <div class="container footer__inner">
       <div><a href="index.html" class="logo"><span class="logo__mark">N</span><span class="logo__text">${STORE_NAME}<small>store</small></span></a>
-      <p class="muted">Интернет-магазин электроники. Учебный проект на Firebase Firestore + Authentication.</p></div>
-      <div><h4>Покупателям</h4><a href="index.html">Каталог</a><a href="cart.html">Корзина</a><a href="profile.html">Личный кабинет</a></div>
-      <div><h4>Сервис</h4><span class="muted">Доставка по Казахстану</span><span class="muted">Бесплатно от 50 000 ₸</span><span class="muted">Возврат 14 дней</span></div>
+      <p class="muted">Интернет-магазин электроники. Все данные — в облачной базе Firebase Firestore, обновления в реальном времени.</p></div>
+      <div><h4>Каталог</h4>${CATEGORIES.slice(0, 5).map(c => `<a href="index.html?cat=${c.id}#catalog">${c.name}</a>`).join("")}</div>
+      <div><h4>Покупателям</h4><a href="cart.html">Корзина</a><a href="profile.html?tab=orders">Мои заказы</a><a href="profile.html?tab=favorites">Избранное</a><a href="auth.html">Вход и регистрация</a></div>
+      <div><h4>Контакты</h4><span class="muted">Алматы, пр. Абая, 1</span><span class="muted">+7 (727) 000-00-00</span><span class="muted">Ежедневно 9:00–21:00</span></div>
     </div>
-    <div class="container footer__copy muted">© ${new Date().getFullYear()} ${STORE_NAME} store · Vanilla JS + Firebase</div>`;
+    <div class="container footer__copy muted"><span>© ${new Date().getFullYear()} ${STORE_NAME} store</span><span>Vanilla JS · Firebase Auth · Cloud Firestore · GitHub Pages</span></div>`;
   document.body.appendChild(footer);
 
-  $("#themeToggle").onclick = () => {
-    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    setTheme(next);
-  };
+  const upd = () => { $("#themeIco").textContent = document.documentElement.dataset.theme === "dark" ? "☀️" : "🌙"; };
+  upd();
+  $("#themeToggle").onclick = () => { setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); upd(); };
   $("#navLogout").onclick = () => logout();
+
+  // «/» — фокус на поиск
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); header.querySelector("input[name=q]").focus(); }
+  });
+
+  // тень у шапки при прокрутке
+  const onScroll = () => header.classList.toggle("header--scrolled", scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+
+  initBell();
 
   onSession((s) => {
     const logged = !!s.user;
     $("#navLogin").hidden = logged;
     $("#navLogout").hidden = !logged;
     $("#navAdmin").hidden = !isAdmin(s);
+    $("#bellWrap").hidden = !logged;
     const nameEl = $("#navProfile span:last-child");
     nameEl.textContent = logged ? (s.profile?.name || "Кабинет").split(" ")[0] : "Кабинет";
 
-    // Счётчик корзины в реальном времени (переподписка только при смене пользователя)
     const uid = s.user?.uid || null;
-    if (uid === cartUid) return;
-    cartUid = uid;
-    if (cartUnsub) { cartUnsub(); cartUnsub = null; }
-    const badge = $("#cartCount");
-    if (logged) {
-      cartUnsub = onSnapshot(collection(db, "carts", s.user.uid, "items"), (snap) => {
-        const count = snap.docs.reduce((a, d) => a + (d.data().qty || 0), 0);
-        badge.textContent = count > 99 ? "99+" : count;
-        badge.hidden = count === 0;
-      }, () => {});
-    } else badge.hidden = true;
+    if (uid !== cartUid) {
+      cartUid = uid;
+      if (cartUnsub) { cartUnsub(); cartUnsub = null; }
+      const badge = $("#cartCount");
+      if (logged) {
+        // Счётчик корзины в реальном времени
+        cartUnsub = onSnapshot(collection(db, "carts", uid, "items"), (snap) => {
+          const count = snap.docs.reduce((a, d) => a + (d.data().qty || 0), 0);
+          badge.textContent = count > 99 ? "99+" : count;
+          badge.hidden = count === 0;
+        }, () => {});
+      } else badge.hidden = true;
+    }
+    if (uid !== ordersUid) {
+      ordersUid = uid;
+      if (ordersUnsub) { ordersUnsub(); ordersUnsub = null; }
+      if (logged) ordersUnsub = watchOrderStatuses(uid);
+    }
   });
 }
+
+/* ---------- Подсказки поиска (живой поиск по Firestore) ---------- */
+function initSuggest(form) {
+  const input = form.querySelector("input");
+  const box = form.querySelector("#suggest");
+  let seq = 0, activeIdx = -1, items = [];
+  const close = () => { box.hidden = true; activeIdx = -1; };
+  const paint = () => {
+    if (!items.length) { box.innerHTML = `<div class="suggest__empty">Ничего не найдено — нажмите Enter для полного поиска</div>`; box.hidden = false; return; }
+    box.innerHTML = items.map((p, i) => `
+      <a class="suggest__item ${i === activeIdx ? "active" : ""}" role="option" href="product.html?id=${encodeURIComponent(p.id)}">
+        <span class="suggest__img">${esc(p.emoji || categoryById(p.category).emoji)}</span>
+        <span class="suggest__name">${esc(p.name)}<small>${esc(categoryById(p.category).name)} · ${esc(p.brand || "")}</small></span>
+        <b>${money(p.price)}</b>
+      </a>`).join("") + `<a class="suggest__all" href="index.html?q=${encodeURIComponent(input.value.trim())}#catalog">Все результаты по «${esc(input.value.trim())}» →</a>`;
+    box.hidden = false;
+  };
+  input.addEventListener("input", debounce(async () => {
+    const text = input.value.trim();
+    if (text.length < 2) return close();
+    const my = ++seq;
+    try {
+      const { quickSearch } = await import("../db/products.js");
+      const res = await quickSearch(text);
+      if (my !== seq) return;
+      items = res; activeIdx = -1; paint();
+    } catch { close(); }
+  }, 250));
+  input.addEventListener("keydown", (e) => {
+    if (box.hidden || !items.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = (activeIdx + 1) % items.length; paint(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = (activeIdx - 1 + items.length) % items.length; paint(); }
+    if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); location.href = `product.html?id=${encodeURIComponent(items[activeIdx].id)}`; }
+    if (e.key === "Escape") close();
+  });
+  document.addEventListener("click", (e) => { if (!form.contains(e.target)) close(); });
+}
+
+/* ---------- Уведомления о статусах заказов (onSnapshot на любой странице) ---------- */
+let bellOrders = [];
+function unreadOrders() {
+  const seen = readSeen();
+  return bellOrders.filter(o => seen[o.id] && seen[o.id] !== o.status);
+}
+function paintBell() {
+  const n = unreadOrders().length;
+  const b = $("#bellCount"); if (!b) return;
+  b.textContent = n; b.hidden = !n;
+  const panel = $("#bellPanel");
+  const list = bellOrders.slice(0, 6);
+  panel.innerHTML = `<div class="bell__head"><b>Мои заказы</b><span class="live-dot">Live</span></div>` + (list.length ? list.map(o => {
+    const s = ORDER_STATUSES[o.status] || { name: o.status, color: "gray" };
+    const fresh = unreadOrders().some(x => x.id === o.id);
+    return `<a class="bell__item ${fresh ? "fresh" : ""}" href="profile.html?tab=orders&order=${o.id}"><span><b>${esc(o.number || "")}</b><small>${money(o.total)} · ${timeAgo(o.updatedAt || o.createdAt)}</small></span><span class="status status--${s.color}">${esc(s.name)}</span></a>`;
+  }).join("") : `<div class="suggest__empty">Заказов пока нет</div>`);
+}
+function initBell() {
+  const btn = $("#bellBtn"), panel = $("#bellPanel");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const open = panel.hidden;
+    panel.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      paintBell();
+      // отмечаем как прочитанные
+      const seen = readSeen(); bellOrders.forEach(o => seen[o.id] = o.status); writeSeen(seen);
+      setTimeout(paintBell, 1500);
+    }
+  };
+  document.addEventListener("click", (e) => { if (!$("#bellWrap").contains(e.target)) panel.hidden = true; });
+}
+function watchOrderStatuses(uid) {
+  return subscribeMyOrders(uid, (list) => {
+    const seen = readSeen();
+    list.forEach(o => {
+      if (!seen[o.id]) seen[o.id] = o.status;                     // новый заказ — считаем увиденным
+      const old = bellOrders.find(x => x.id === o.id);
+      if (old && old.status !== o.status && !location.pathname.endsWith("profile.html")) {
+        toast(`Заказ ${o.number}: ${ORDER_STATUSES[o.status]?.name || o.status}`, "info", 5000);
+      }
+    });
+    writeSeen(seen);
+    bellOrders = list;
+    paintBell();
+  }, () => {});
+}
+
+/* ---------- PWA и глобальная обработка ошибок ---------- */
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+addEventListener("unhandledrejection", (e) => {
+  console.error(e.reason);
+  if (e.reason?.code) toast(humanError(e.reason), "error");
+});
+addEventListener("offline", () => toast("Нет интернета — показываем сохранённые данные", "warn", 5000));
+addEventListener("online", () => toast("Соединение восстановлено", "success"));
 
 /* ---------- Ошибки Firebase на русском ---------- */
 export function humanError(e) {

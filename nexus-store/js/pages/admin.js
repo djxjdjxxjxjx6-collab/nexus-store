@@ -1,6 +1,6 @@
 // Админ-панель: статистика, CRUD товаров, заказы (real-time), пользователи и роли, модерация, промокоды
 import {
-  mountLayout, $, $$, esc, money, fmtDate, timeAgo, statusBadge, productImage, stars,
+  mountLayout, $, $$, esc, money, fmtDate, timeAgo, statusBadge, productImage, stars, productCard,
   emptyState, toast, humanError, confirmDialog, openModal, debounce, plural
 } from "../core/ui.js";
 import { requireAuth, isAdmin, getSession, onSession } from "../core/session.js";
@@ -55,16 +55,16 @@ async function dash(root) {
     const days = [...Array(14)].map((_, i) => { const d = new Date(Date.now() - (13 - i) * 86400000); return { key: d.toDateString(), label: d.getDate(), sum: 0, n: 0 }; });
     recent.forEach(o => { const d = o.createdAt?.toDate?.(); const day = d && days.find(x => x.key === d.toDateString()); if (day && o.status !== "cancelled") { day.sum += o.total; day.n++; } });
     const max = Math.max(1, ...days.map(d => d.sum));
-    const totalByStatus = Object.values(st.byStatus).reduce((a, b) => a + b, 0) || 1;
+    const totalByStatus = Object.values(st.byStatus).reduce((a, b) => a + (b || 0), 0) || 1;
     const avg = st.orders ? st.revenue / Math.max(1, st.orders - (st.byStatus.cancelled || 0)) : 0;
     root.innerHTML = `
       <div class="stat-cards">
         <div class="card stat"><span class="stat__icon">💰</span><div class="stat__label">Выручка</div><div class="stat__value">${money(st.revenue)}</div></div>
-        <div class="card stat"><span class="stat__icon">🧾</span><div class="stat__label">Заказов</div><div class="stat__value">${st.orders}</div></div>
+        <div class="card stat"><span class="stat__icon">🧾</span><div class="stat__label">Заказов</div><div class="stat__value">${st.orders ?? "—"}</div></div>
         <div class="card stat"><span class="stat__icon">📈</span><div class="stat__label">Средний чек</div><div class="stat__value">${money(avg)}</div></div>
-        <div class="card stat"><span class="stat__icon">👥</span><div class="stat__label">Пользователей</div><div class="stat__value">${st.users}</div></div>
-        <div class="card stat"><span class="stat__icon">📦</span><div class="stat__label">Товаров</div><div class="stat__value">${st.products}</div></div>
-        <div class="card stat"><span class="stat__icon">⚠️</span><div class="stat__label">Нет в наличии</div><div class="stat__value">${st.outOfStock}</div></div>
+        <div class="card stat"><span class="stat__icon">👥</span><div class="stat__label">Пользователей</div><div class="stat__value">${st.users ?? "—"}</div></div>
+        <div class="card stat"><span class="stat__icon">📦</span><div class="stat__label">Товаров</div><div class="stat__value">${st.products ?? "—"}</div></div>
+        <div class="card stat"><span class="stat__icon">⚠️</span><div class="stat__label">Нет в наличии</div><div class="stat__value">${st.outOfStock ?? "—"}</div></div>
       </div>
       ${st.products === 0 ? `<div class="notice">Каталог пуст. <button class="btn btn--primary btn--sm" id="seedBtn">Заполнить демо-товарами (40 шт.)</button></div>` : ""}
       <div class="admin-grid">
@@ -133,7 +133,7 @@ function products(root) {
         <td><span class="status status--${!p.stock ? "red" : p.stock <= 5 ? "amber" : "green"}">${p.stock}</span></td>
         <td>${(p.ratingAvg || 0).toFixed(1)} ★ <span class="small muted">(${p.ratingCount || 0})</span></td>
         <td>${p.salesCount || 0}</td>
-        <td style="white-space:nowrap"><button class="btn btn--sm btn--ghost" data-edit>✎</button> <button class="btn btn--sm btn--ghost" data-del style="color:var(--red)">🗑</button></td>
+        <td style="white-space:nowrap"><button class="btn btn--sm btn--ghost" data-edit title="Редактировать">✎</button> <button class="btn btn--sm btn--ghost" data-copy title="Дублировать">⧉</button> <button class="btn btn--sm btn--ghost" data-del style="color:var(--red)">🗑</button></td>
       </tr>`).join("") : `<tr><td colspan="8">${emptyState("📦", "Товаров нет", "Добавьте первый товар или загрузите демо-данные")}</td></tr>`;
     $("#pMore").hidden = !hasMore;
   };
@@ -149,6 +149,7 @@ function products(root) {
     const tr = e.target.closest("tr[data-id]"); if (!tr) return;
     const p = items.find(x => x.id === tr.dataset.id);
     if (e.target.closest("[data-edit]")) productForm(p, () => load(true));
+    if (e.target.closest("[data-copy]")) productForm({ ...p, id: null, name: p.name + " (копия)", __details: await getDetails(p.id) }, () => load(true));
     if (e.target.closest("[data-del]")) {
       if (!await confirmDialog(`Удалить «${p.name}»? Это действие необратимо.`, { okText: "Удалить", danger: true })) return;
       try { await deleteProduct(p.id); items = items.filter(x => x.id !== p.id); paint(); toast("Товар удалён", "success"); }
@@ -159,10 +160,11 @@ function products(root) {
 }
 
 async function productForm(p, onSaved) {
-  const d = p ? await getDetails(p.id) : { description: "", specs: {} };
+  const d = p?.id ? await getDetails(p.id) : (p?.__details || { description: "", specs: {} });
   const specsText = Object.entries(d.specs || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
   const m = openModal(`
-    <h3 class="modal__title">${p ? "Редактировать товар" : "Новый товар"}</h3>
+    <h3 class="modal__title">${p?.id ? "Редактировать товар" : "Новый товар"}</h3>
+    <div class="form-preview" id="pPreview"></div>
     <form id="pForm">
       <div class="grid-2">
         <div class="field"><label>Название *</label><input class="input" name="name" required maxlength="120" value="${esc(p?.name || "")}"></div>
@@ -179,8 +181,17 @@ async function productForm(p, onSaved) {
       <div class="field"><label>Полное описание</label><textarea class="input" name="description" rows="4">${esc(d.description || "")}</textarea></div>
       <div class="field"><label>Характеристики (каждая с новой строки: «Ключ: значение»)</label><textarea class="input" name="specs" rows="4">${esc(specsText)}</textarea></div>
       <label class="check"><input type="checkbox" name="isNew" ${p?.isNew ? "checked" : ""}> Пометить как «NEW»</label>
-      <div class="modal__actions"><button type="button" class="btn btn--ghost" data-close>Отмена</button><button class="btn btn--primary">${p ? "Сохранить" : "Создать"}</button></div>
+      <div class="modal__actions"><button type="button" class="btn btn--ghost" data-close>Отмена</button><button class="btn btn--primary">${p?.id ? "Сохранить" : "Создать"}</button></div>
     </form>`, { wide: true });
+  // живой предпросмотр карточки
+  const pf = m.el.querySelector("#pForm");
+  const preview = () => {
+    const v = Object.fromEntries(new FormData(pf));
+    m.el.querySelector("#pPreview").innerHTML = productCard({ id: "preview", name: v.name || "Название товара", brand: v.brand, category: v.category,
+      emoji: v.emoji, image: v.image, price: Number(v.price) || 0, oldPrice: Number(v.oldPrice) || 0, stock: Number(v.stock) || 0,
+      ratingAvg: p?.ratingAvg || 0, ratingCount: p?.ratingCount || 0, isNew: !!v.isNew });
+  };
+  pf.addEventListener("input", preview); preview();
   m.el.querySelector("#pForm").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target, btn = f.querySelector("button:not([data-close])");
@@ -193,7 +204,7 @@ async function productForm(p, onSaved) {
         price: f.price.value, oldPrice: f.oldPrice.value, stock: f.stock.value, tags: f.tags.value,
         image: f.image.value, shortDesc: f.shortDesc.value, description: f.description.value, specs, isNew: f.isNew.checked
       }, p?.id || null);
-      toast(p ? "Товар обновлён" : "Товар создан — он уже появился в каталоге у всех покупателей", "success");
+      toast(p?.id ? "Товар обновлён" : "Товар создан — он уже появился в каталоге у всех покупателей", "success");
       m.close(); onSaved && onSaved();
     } catch (err) { toast(humanError(err), "error"); btn.classList.remove("loading"); }
   };
@@ -206,7 +217,8 @@ function orders(root) {
     <div class="card panel">
       <div class="row" style="margin-bottom:14px"><h3 style="margin:0">Все заказы</h3><span class="live-dot">Live</span><div class="spacer"></div>
         <button class="btn btn--ghost btn--sm" id="csv">⬇ Экспорт CSV</button></div>
-      <div class="filter-pills"><button class="pill active" data-f="">Все</button>${Object.entries(ORDER_STATUSES).map(([k, v]) => `<button class="pill" data-f="${k}">${v.name}</button>`).join("")}</div>
+      <div class="filter-pills"><button class="pill active" data-f="">Все</button>${Object.entries(ORDER_STATUSES).map(([k, v]) => `<button class="pill" data-f="${k}">${v.name}</button>`).join("")}
+        <div class="spacer"></div><input class="input" id="oSearch" placeholder="№ заказа, имя или e-mail" style="max-width:240px"></div>
       <div class="table-wrap"><table class="table"><thead><tr><th>№</th><th>Дата</th><th>Покупатель</th><th>Товары</th><th>Сумма</th><th>Статус</th><th></th></tr></thead><tbody id="oBody"></tbody></table></div>
       <div class="load-more"><button class="btn btn--ghost" id="oMore" hidden>Показать ещё</button></div>
     </div>`;
@@ -218,8 +230,10 @@ function orders(root) {
       list = l; paint();
     }, (e) => toast(humanError(e), "error")));
   };
+  let term = "";
   const paint = () => {
-    $("#oBody").innerHTML = list.length ? list.map(o => `
+    const shown = term ? list.filter(o => [o.number, o.userName, o.userEmail, o.delivery?.phone].join(" ").toLowerCase().includes(term)) : list;
+    $("#oBody").innerHTML = shown.length ? shown.map(o => `
       <tr data-id="${o.id}">
         <td><b>${esc(o.number || o.id.slice(0, 6))}</b></td>
         <td class="small">${fmtDate(o.createdAt)}</td>
@@ -233,6 +247,7 @@ function orders(root) {
   };
   $$(".pill", root).forEach(p => p.onclick = () => { $$(".pill", root).forEach(x => x.classList.toggle("active", x === p)); status = p.dataset.f; list = []; sub(); });
   $("#oMore").onclick = () => { size += 30; sub(); };
+  $("#oSearch").oninput = debounce((e) => { term = e.target.value.trim().toLowerCase(); paint(); }, 200);
   $("#oBody").onchange = async (e) => {
     const sel = e.target.closest("[data-status]"); if (!sel) return;
     const o = list.find(x => x.id === sel.closest("tr").dataset.id);

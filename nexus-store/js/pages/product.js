@@ -15,7 +15,6 @@ const app = $("#app");
 let product = null;
 let qty = 1;
 let rendered = false;
-let prev = null;
 
 if (!id) {
   app.innerHTML = emptyState("🤷", "Товар не указан", "", `<a class="btn btn--primary" href="index.html">В каталог</a>`);
@@ -44,6 +43,7 @@ function renderPage() {
   const p = product;
   const cat = categoryById(p.category);
   document.title = `${p.name} — NEXUS store`;
+  document.querySelector('meta[name="description"]')?.setAttribute("content", `${p.name}: ${p.shortDesc || ""} Цена ${money(p.price)}.`);
   app.innerHTML = `
     <nav class="breadcrumbs"><a href="index.html">Главная</a>›<a href="index.html?cat=${p.category}">${esc(cat.name)}</a>›<span>${esc(p.name)}</span></nav>
     <div class="product-layout">
@@ -59,7 +59,11 @@ function renderPage() {
           <div class="qty"><button id="qMinus" aria-label="Меньше">−</button><input id="qInput" type="number" value="1" min="1"><button id="qPlus" aria-label="Больше">+</button></div>
           <button class="btn btn--primary btn--lg" id="addBtn">🛒 В корзину</button>
           <button class="btn btn--ghost btn--lg" id="buyBtn">Купить сейчас</button>
-          <button class="btn btn--ghost btn--lg btn--icon fav-inline" id="favBtn" title="В избранное">♥</button>
+          <button class="btn btn--ghost btn--lg btn--icon fav-inline" id="favBtn" title="В избранное" aria-label="В избранное">♥</button>
+          <button class="btn btn--ghost btn--lg btn--icon" id="shareBtn" title="Поделиться" aria-label="Поделиться">⤴</button>
+        </div>
+        <div class="installments card">
+          <span>💳 Рассрочка 0-0-12</span><b>${money(Math.ceil(p.price / 12))} / мес</b>
         </div>
         <div class="perks">
           <div class="perk"><b>🚚</b>Бесплатная доставка от ${money(FREE_DELIVERY_FROM)}</div>
@@ -88,6 +92,11 @@ function renderPage() {
       </div>
     </section>
 
+    <div class="sticky-buy" id="stickyBuy">
+      <div><b>${esc(p.name)}</b><span id="stickyPrice">${money(p.price)}</span></div>
+      <button class="btn btn--primary" id="stickyAdd">🛒 В корзину</button>
+    </div>
+
     <div class="section-title"><h2>Похожие товары</h2></div>
     <div class="grid" id="similar"></div>
     <div class="load-more"><button class="btn btn--ghost" id="moreSimilar" hidden>Показать ещё похожие</button></div>
@@ -111,6 +120,17 @@ function renderPage() {
     await addProductToCart(product, qty, e.currentTarget);
     location.href = "cart.html";
   };
+  $("#stickyAdd").onclick = (e) => addProductToCart(product, qty, e.currentTarget);
+  $("#shareBtn").onclick = async () => {
+    const data = { title: product.name, text: `${product.name} — ${money(product.price)} в NEXUS store`, url: location.href };
+    try {
+      if (navigator.share) await navigator.share(data);
+      else { await navigator.clipboard.writeText(location.href); toast("Ссылка скопирована", "success"); }
+    } catch { /* пользователь отменил */ }
+  };
+  // липкая панель покупки на мобильных, когда основная кнопка ушла за экран
+  new IntersectionObserver(([en]) => $("#stickyBuy").classList.toggle("show", !en.isIntersecting && en.boundingClientRect.top < 0))
+    .observe($("#addBtn"));
   $("#favBtn").dataset.fav = product.id;
   $("#favBtn").onclick = () => toggleProductFav(product);
   paintFavs();
@@ -125,6 +145,7 @@ function renderPage() {
 function refreshBuyState() {
   const out = !product.stock;
   $("#addBtn").disabled = out;
+  if ($("#stickyAdd")) $("#stickyAdd").disabled = out;
   $("#buyBtn").disabled = out;
   if (qty > (product.stock || 1)) { qty = Math.max(1, product.stock || 1); $("#qInput").value = qty; }
 }
@@ -133,6 +154,7 @@ function refreshBuyState() {
 function updateLive(old, p) {
   if (old.price !== p.price || old.oldPrice !== p.oldPrice) {
     $("#priceBox").innerHTML = priceHtml(p);
+    if ($("#stickyPrice")) $("#stickyPrice").textContent = money(p.price);
     $("#priceBox").classList.remove("flash"); void $("#priceBox").offsetWidth; $("#priceBox").classList.add("flash");
     toast("Цена обновилась", "info");
   }

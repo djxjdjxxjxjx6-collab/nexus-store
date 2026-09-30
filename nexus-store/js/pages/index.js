@@ -1,7 +1,7 @@
-// Главная: каталог с пагинацией, поиском, фильтрами, сортировкой и real-time обновлениями
-import { mountLayout, $, esc, productCard, skeletonCards, emptyState, toast, humanError, qs, getRecent, plural } from "../core/ui.js";
+// Главная: витрина + каталог с пагинацией, поиском, фильтрами (категория, скидка, цена), сортировкой и real-time
+import { mountLayout, $, $$, esc, money, productCard, skeletonCards, emptyState, toast, humanError, qs, getRecent, plural, debounce } from "../core/ui.js";
 import { CATEGORIES, SORTS, categoryById } from "../core/config.js";
-import { subscribeCatalog, fetchCatalogPage, countCatalog } from "../db/products.js";
+import { subscribeCatalog, fetchCatalogPage, countCatalog, fetchBestsellers, countByCategory, hasPriceRange } from "../db/products.js";
 import { bindProductGrid, paintFavs } from "../core/actions.js";
 
 mountLayout("catalog");
@@ -11,45 +11,80 @@ const state = {
   onSale: qs("sale") === "1",
   search: qs("q") || "",
   sort: qs("sort") || "new",
-  items: [],          // первая страница (real-time)
-  more: [],           // последующие страницы (getDocs)
+  minPrice: Number(qs("min")) || 0,
+  maxPrice: Number(qs("max")) || 0,
+  items: [],          // первая страница (real-time, onSnapshot)
+  more: [],           // последующие страницы (getDocs + startAfter)
   lastDoc: null,
   hasMore: false,
   clientSide: false,
   unsub: null,
   knownIds: new Set()
 };
+const isHome = !state.search && !state.category && !state.onSale && !hasPriceRange(state);
 
 $("#app").innerHTML = `
-  ${state.search ? "" : `
+  ${isHome ? `
   <section class="hero">
-    <div class="hero__emoji">🎧</div>
-    <span class="badge badge--sale">Осенняя распродажа</span>
-    <h1>Электроника, которая делает жизнь проще</h1>
-    <p>Смартфоны, ноутбуки, гаджеты и аксессуары с доставкой по всему Казахстану. Промокод <b>WELCOME10</b> — скидка 10% на первый заказ.</p>
-    <div class="row"><a href="#catalog" class="btn btn--lg">Смотреть каталог →</a></div>
-    <div class="hero__stats">
-      <div><b id="statProducts">—</b><span>товаров</span></div>
-      <div><b>9</b><span>категорий</span></div>
-      <div><b>24/7</b><span>поддержка</span></div>
+    <div class="hero__blob hero__blob--1"></div><div class="hero__blob hero__blob--2"></div>
+    <div class="hero__content">
+      <span class="pill-badge">🔥 Осенняя распродажа · до −20%</span>
+      <h1>Техника, которая <span class="grad-text">делает жизнь проще</span></h1>
+      <p>Смартфоны, ноутбуки, аудио и умный дом с официальной гарантией. Наличие и цены обновляются в реальном времени.</p>
+      <div class="row">
+        <a href="#catalog" class="btn btn--light btn--lg">Смотреть каталог →</a>
+        <a href="index.html?sale=1#catalog" class="btn btn--glass btn--lg">Товары со скидкой</a>
+      </div>
+      <div class="hero__stats">
+        <div><b id="statProducts">—</b><span>товаров</span></div>
+        <div><b>${CATEGORIES.length}</b><span>категорий</span></div>
+        <div><b>12 мес</b><span>гарантия</span></div>
+      </div>
     </div>
-  </section>`}
-  <div id="catalog"></div>
+    <div class="hero__visual" aria-hidden="true">
+      <div class="float-card float-card--1">📱<span>iPhone 16 Pro</span></div>
+      <div class="float-card float-card--2">🎧<span>−11%</span></div>
+      <div class="float-card float-card--3">💻<span>MacBook Air</span></div>
+      <div class="hero__emoji">⚡</div>
+    </div>
+  </section>
+
+  <section class="promo-row">
+    <a class="promo promo--a" href="index.html?cat=audio#catalog"><span>Аудио</span><b>Звук без проводов</b><em>🎧</em></a>
+    <a class="promo promo--b" href="index.html?cat=gaming#catalog"><span>Игры</span><b>Консоли и геймпады</b><em>🎮</em></a>
+    <a class="promo promo--c" href="index.html?cat=smarthome#catalog"><span>Умный дом</span><b>Автоматизируйте быт</b><em>🏠</em></a>
+  </section>
+
+  <div class="section-title"><h2>Категории</h2></div>
+  <section class="cat-tiles" id="catTiles">
+    ${CATEGORIES.map(c => `<a class="cat-tile" href="index.html?cat=${c.id}#catalog" data-cat="${c.id}"><span class="cat-tile__emoji">${c.emoji}</span><b>${esc(c.name)}</b><small data-count="${c.id}">&nbsp;</small></a>`).join("")}
+  </section>
+
+  <div class="section-title"><h2>🔥 Хиты продаж</h2><span class="muted small">по количеству покупок</span></div>
+  <div class="hscroll" id="bestsellers">${skeletonCards(5)}</div>` : ""}
+
+  <div id="catalog" class="anchor"></div>
   <nav class="cats" id="cats" aria-label="Категории">
     <button class="cat-chip" data-cat="">✨ Все</button>
     ${CATEGORIES.map(c => `<button class="cat-chip" data-cat="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join("")}
   </nav>
   <div class="toolbar">
-    <div>
+    <div class="toolbar__title">
       <h1 id="title" style="margin:0"></h1>
-      <div class="row"><span class="result-info" id="resultInfo"></span><span class="live-dot" title="Каталог обновляется в реальном времени">Live</span></div>
+      <div class="row"><span class="result-info" id="resultInfo"></span><span class="live-dot" title="Каталог обновляется в реальном времени (onSnapshot)">Live</span></div>
     </div>
     <div class="spacer"></div>
-    <label class="check"><input type="checkbox" id="onSale"> 🔥 Только со скидкой</label>
+    <div class="price-filter" title="Диапазон цен">
+      <input class="input" id="minPrice" type="number" min="0" step="1000" placeholder="Цена от" aria-label="Цена от">
+      <span>—</span>
+      <input class="input" id="maxPrice" type="number" min="0" step="1000" placeholder="до" aria-label="Цена до">
+    </div>
+    <label class="check switch"><input type="checkbox" id="onSale"><span></span> Со скидкой</label>
     <select class="input" id="sort" aria-label="Сортировка">
       ${SORTS.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}
     </select>
   </div>
+  <div class="active-filters" id="activeFilters"></div>
   <div class="grid" id="grid">${skeletonCards(8)}</div>
   <div class="load-more"><button class="btn btn--ghost btn--lg" id="moreBtn" hidden>Показать ещё</button></div>
   <section id="recentSection" hidden>
@@ -67,25 +102,46 @@ function syncUrl() {
   if (state.search) p.set("q", state.search);
   if (state.category) p.set("cat", state.category);
   if (state.onSale) p.set("sale", "1");
+  if (state.minPrice) p.set("min", state.minPrice);
+  if (state.maxPrice) p.set("max", state.maxPrice);
   if (state.sort !== "new") p.set("sort", state.sort);
-  history.replaceState(null, "", `${location.pathname}${p.toString() ? "?" + p : ""}`);
+  history.replaceState(null, "", `${location.pathname}${p.toString() ? "?" + p : ""}${location.hash}`);
 }
 
 function renderControls() {
-  document.querySelectorAll(".cat-chip").forEach(b => b.classList.toggle("active", b.dataset.cat === state.category));
+  $$(".cat-chip").forEach(b => b.classList.toggle("active", b.dataset.cat === state.category));
   $("#onSale").checked = state.onSale;
+  $("#minPrice").value = state.minPrice || "";
+  $("#maxPrice").value = state.maxPrice || "";
+  // при диапазоне цен Firestore разрешает сортировать только по цене
+  const ranged = hasPriceRange(state) && !state.search;
+  $$("#sort option").forEach(o => o.disabled = ranged && !o.value.startsWith("price"));
+  if (ranged && !state.sort.startsWith("price")) state.sort = "price_asc";
   $("#sort").value = state.sort;
   const cat = state.category ? categoryById(state.category) : null;
-  $("#title").textContent = state.search ? `Поиск: «${state.search}»` : cat ? `${cat.emoji} ${cat.name}` : "Каталог";
+  $("#title").textContent = state.search ? `Поиск: «${state.search}»` : cat ? `${cat.emoji} ${cat.name}` : "Весь каталог";
+
+  const chips = [];
+  if (state.search) chips.push(["search", `Поиск: ${state.search}`]);
+  if (cat) chips.push(["category", cat.name]);
+  if (state.onSale) chips.push(["onSale", "Со скидкой"]);
+  if (state.minPrice) chips.push(["minPrice", `от ${money(state.minPrice)}`]);
+  if (state.maxPrice) chips.push(["maxPrice", `до ${money(state.maxPrice)}`]);
+  $("#activeFilters").innerHTML = chips.length ? chips.map(([k, t]) => `<button class="filter-chip" data-clear="${k}">${esc(t)} ✕</button>`).join("") + `<button class="link-btn" data-clear="all">Сбросить всё</button>` : "";
+}
+
+function resetFilters() {
+  state.search = ""; state.category = ""; state.onSale = false; state.minPrice = 0; state.maxPrice = 0;
+  $(".header__search input").value = "";
 }
 
 function render() {
   const list = allItems();
   if (!list.length) {
     grid.innerHTML = emptyState("🔍", "Ничего не найдено",
-      state.search ? "Попробуйте изменить запрос или сбросить фильтры" : "В этой категории пока нет товаров",
+      state.search ? "Попробуйте изменить запрос или сбросить фильтры" : "По выбранным фильтрам товаров нет",
       `<button class="btn btn--primary" id="resetBtn">Сбросить фильтры</button>`);
-    $("#resetBtn").onclick = () => { state.search = ""; state.category = ""; state.onSale = false; $(".header__search input").value = ""; reload(); };
+    $("#resetBtn").onclick = () => { resetFilters(); reload(); };
   } else {
     grid.innerHTML = list.map(p => productCard(p)).join("");
     paintFavs(grid);
@@ -97,9 +153,8 @@ function render() {
 async function updateCount() {
   if (state.search) return;
   try {
-    const n = await countCatalog(state);
+    const n = await countCatalog(state);   // агрегатный запрос count() — документы не скачиваются
     $("#resultInfo").textContent = `${n} ${plural(n, ["товар", "товара", "товаров"])}`;
-    if (!state.category && !state.onSale && $("#statProducts")) $("#statProducts").textContent = n;
   } catch { /* count недоступен оффлайн */ }
 }
 
@@ -118,7 +173,8 @@ function reload() {
     // курсор берём из real-time страницы, пока пользователь не подгрузил следующие
     if (!state.more.length) { state.lastDoc = res.lastDoc; state.hasMore = res.hasMore; }
     if (!first && res.changes.length) {
-      res.changes.filter(p => !state.knownIds.has(p.id) && (!p.createdAt || p.createdAt.seconds > Date.now() / 1000 - 600)).forEach(p => toast(`Новинка в каталоге: ${p.name}`, "info"));
+      res.changes.filter(p => !state.knownIds.has(p.id) && (!p.createdAt || p.createdAt.seconds > Date.now() / 1000 - 600))
+        .forEach(p => toast(`Новинка в каталоге: ${p.name}`, "info"));
       updateCount();
     }
     res.items.forEach(p => state.knownIds.add(p.id));
@@ -152,17 +208,53 @@ $("#cats").onclick = (e) => {
 };
 $("#onSale").onchange = (e) => { state.onSale = e.target.checked; reload(); };
 $("#sort").onchange = (e) => { state.sort = e.target.value; reload(); };
+const onPrice = debounce(() => {
+  const min = Math.max(0, Number($("#minPrice").value) || 0), max = Math.max(0, Number($("#maxPrice").value) || 0);
+  if (max && min > max) return toast("Минимальная цена больше максимальной", "warn");
+  state.minPrice = min; state.maxPrice = max; reload();
+}, 600);
+$("#minPrice").oninput = onPrice;
+$("#maxPrice").oninput = onPrice;
+$("#activeFilters").onclick = (e) => {
+  const b = e.target.closest("[data-clear]"); if (!b) return;
+  const k = b.dataset.clear;
+  if (k === "all") resetFilters();
+  else if (k === "search") { state.search = ""; $(".header__search input").value = ""; }
+  else if (k === "onSale") state.onSale = false;
+  else state[k] = k === "category" ? "" : 0;
+  reload();
+};
 
 // Поиск из шапки без перезагрузки страницы
 const searchForm = $(".header__search");
 searchForm.addEventListener("submit", (e) => {
   e.preventDefault();
   state.search = searchForm.q.value.trim();
+  $("#suggest").hidden = true;
   reload();
-  document.getElementById("catalog").scrollIntoView({ behavior: "smooth" });
+  $("#catalog").scrollIntoView({ behavior: "smooth" });
 });
 
-// Недавно просмотренные
+// Витрина: хиты продаж и счётчики категорий
+if (isHome) {
+  fetchBestsellers(10).then(list => {
+    const box = $("#bestsellers");
+    box.innerHTML = list.map(p => productCard(p)).join("");
+    bindProductGrid(box, (id) => list.find(p => p.id === id));
+    paintFavs(box);
+  }).catch(() => { $("#bestsellers").innerHTML = ""; });
+  countByCategory(CATEGORIES.map(c => c.id)).then(map => {
+    let total = 0;
+    Object.entries(map).forEach(([id, n]) => {
+      total += n || 0;
+      const el = document.querySelector(`[data-count="${id}"]`);
+      if (el && n !== null) el.textContent = `${n} ${plural(n, ["товар", "товара", "товаров"])}`;
+    });
+    if ($("#statProducts")) $("#statProducts").textContent = total;
+  });
+}
+
+// Недавно просмотренные (localStorage)
 const recent = getRecent();
 if (recent.length) {
   $("#recentSection").hidden = false;
@@ -171,3 +263,4 @@ if (recent.length) {
 }
 
 reload();
+if (location.hash === "#catalog" || !isHome) setTimeout(() => $("#catalog").scrollIntoView(), 50);
