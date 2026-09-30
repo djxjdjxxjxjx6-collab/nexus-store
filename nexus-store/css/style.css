@@ -513,3 +513,15 @@ h1, h2 { font-weight: 700; }
   .cat-tile { padding: 12px 6px; }
   .cat-tile__emoji { width: 48px; height: 48px; font-size: 26px; }
 }
+
+/* v2.1: фиксы адаптива */
+.nav__link span:last-child { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1000px) {
+  .header__inner { flex-wrap: wrap; height: auto; padding: 10px 0; gap: 10px; }
+  .header__search { order: 3; flex-basis: 100%; max-width: none; }
+}
+@media (max-width: 760px) {
+  /* backdrop-filter у шапки создаёт контейнер для position:fixed — отключаем, чтобы нижняя навигация прилипала к экрану */
+  .header { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--surface); }
+  .nav__link span:last-child { max-width: 64px; }
+}

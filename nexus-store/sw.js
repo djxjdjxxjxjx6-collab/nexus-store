@@ -1,5 +1,5 @@
 // Service Worker: офлайн-кэш статики (Firestore сам кэширует данные в IndexedDB)
-const CACHE = "nexus-v2";
+const CACHE = "nexus-v2.1";
 const ASSETS = [
   "./", "index.html", "product.html", "cart.html", "profile.html", "admin.html", "auth.html", "404.html",
   "css/style.css", "manifest.webmanifest", "img/icon-192.png",
