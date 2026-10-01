@@ -2,6 +2,10 @@
 import { db } from "../core/firebase.js";
 import { doc, collection, writeBatch, Timestamp, setDoc } from "../sdk/firestore.js";
 import { productPayload } from "./products.js";
+import { unsplash } from "../core/config.js";
+
+// Фото товаров (Unsplash, бесплатная лицензия)
+const PHOTOS = { "iPhone 16 Pro 256 ГБ": "1592750475338-74b7b21085ab", "Galaxy S25 Ultra 512 ГБ": "1707438095940-1eee18e85400", "Pixel 9 128 ГБ": "1628320281190-89b24da58b0f", "Redmi Note 14 Pro 256 ГБ": "1598965402089-897ce52e8355", "Nothing Phone (3a)": "1511707171634-5f897ff02aa9", "MacBook Air 13 M4 16/512": "1517336714731-489689fd1ca8", "MacBook Pro 14 M4 Pro": "1611186871348-b1ce696e52c9", "ASUS ROG Strix G16": "1640955014216-75201056c829", "Lenovo ThinkPad X1 Carbon": "1773366105707-18a8bc4aa7e6", "HUAWEI MateBook D16": "1541807084-5c52b6b3adef", "iPad Air 11 M2 128 ГБ": "1527698266440-12104e498b76", "Galaxy Tab S10 FE": "1589739900243-4b52cd9b104e", "Xiaomi Pad 7": "1561154464-82e9adf32764", "AirPods Pro 2 USB-C": "1606841837239-c5a1a4a07af7", "Sony WH-1000XM5": "1618366712010-f4ae9c647dcb", "JBL Charge 5": "1608043152269-423dbba4e7e1", "Galaxy Buds3 Pro": "1590658268037-6bf12165a8df", "Marshall Emberton III": "1589003077984-894e133dabab", "Apple Watch Series 10 46 мм": "1546868871-7041f2a55e12", "Galaxy Watch7 44 мм": "1579586337278-3befd40fd17a", "Garmin Forerunner 265": "1722445423163-f57f92ea9f78", "Xiaomi Smart Band 9": "1576243345690-4e4b79b63288", "PlayStation 5 Slim": "1606144042614-b2417e99c4e3", "Nintendo Switch OLED": "1612036781124-847f8939b154", "Xbox Series X": "1621259182978-fbf93132d53d", "DualSense Edge": "1612287230202-1ff1d85d1bdf", "Logitech G Pro X Superlight 2": "1629429408209-1f912961dbd8", "Sony Alpha 7 IV Body": "1516035069371-29a1b244cc32", "GoPro HERO13 Black": "1604942177421-df466b7410f6", "DJI Mini 4 Pro": "1507582020474-9a35b7d455d9", "DJI Osmo Mobile 7": "1698336953339-25cb03ab33d1", "Яндекс Станция Макс": "1519558260268-cde7e03a0152", "Xiaomi Robot Vacuum S20+": "1653990480360-31a12ce9723e", "Philips Hue Starter Kit": "1556401615-c909c3d67480", "Aqara Smart Lock U200": "1558002038-1055907df827", "Anker Power Bank 20000": "1577538926210-fc6cc624fde2", "Apple MagSafe Charger": "1591290619618-904f6dd935e3", "Samsung T7 Shield 2 ТБ": "1721333084639-0f64b0583875", "Keychron K2 Pro": "1618384887929-16ec33fab9ef", "Ugreen Nexode 100W": "1583863788434-e58a36330cf0" };
 
 // [name, brand, category, price, oldPrice, stock, emoji, tags, shortDesc, specs]
 const RAW = [
@@ -60,7 +64,7 @@ export async function seedDemo(user) {
   RAW.forEach((r, i) => {
     const [name, brand, category, price, oldPrice, stock, emoji, tags, shortDesc, specs] = r;
     const ref = doc(collection(db, "products"));
-    const base = productPayload({ name, brand, category, price, oldPrice, stock, emoji, tags, shortDesc, isNew: i % 7 === 0 });
+    const base = productPayload({ name, brand, category, price, oldPrice, stock, emoji, tags, shortDesc, isNew: i % 7 === 0, image: PHOTOS[name] ? unsplash(PHOTOS[name]) : "" });
     // Демонстрационный рейтинг
     const cnt = (i * 7) % 23 + 1;
     const avg = Math.round((3.6 + ((i * 13) % 14) / 10) * 10) / 10;

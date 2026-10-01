@@ -321,7 +321,7 @@ function initSuggest(form) {
     if (!items.length) { box.innerHTML = `<div class="suggest__empty">Ничего не найдено — нажмите Enter для полного поиска</div>`; box.hidden = false; return; }
     box.innerHTML = items.map((p, i) => `
       <a class="suggest__item ${i === activeIdx ? "active" : ""}" role="option" href="product.html?id=${encodeURIComponent(p.id)}">
-        <span class="suggest__img">${esc(p.emoji || categoryById(p.category).emoji)}</span>
+        <span class="suggest__img">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : esc(p.emoji || categoryById(p.category).emoji)}</span>
         <span class="suggest__name">${esc(p.name)}<small>${esc(categoryById(p.category).name)} · ${esc(p.brand || "")}</small></span>
         <b>${money(p.price)}</b>
       </a>`).join("") + `<a class="suggest__all" href="index.html?q=${encodeURIComponent(input.value.trim())}#catalog">Все результаты по «${esc(input.value.trim())}» →</a>`;

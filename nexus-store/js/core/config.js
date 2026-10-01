@@ -12,16 +12,19 @@ export const DELIVERY_PRICE = 1500;
 export const ADMIN_EMAILS = ["admin@nexus-store.kz"];
 
 export const CATEGORIES = [
-  { id: "smartphones", name: "Смартфоны", emoji: "📱" },
-  { id: "laptops", name: "Ноутбуки", emoji: "💻" },
-  { id: "tablets", name: "Планшеты", emoji: "📲" },
-  { id: "audio", name: "Аудио", emoji: "🎧" },
-  { id: "watches", name: "Умные часы", emoji: "⌚" },
-  { id: "gaming", name: "Игры", emoji: "🎮" },
-  { id: "photo", name: "Фото и видео", emoji: "📷" },
-  { id: "smarthome", name: "Умный дом", emoji: "🏠" },
-  { id: "accessories", name: "Аксессуары", emoji: "🔌" }
+  { id: "smartphones", name: "Смартфоны", emoji: "📱", img: "1592750475338-74b7b21085ab" },
+  { id: "laptops", name: "Ноутбуки", emoji: "💻", img: "1517336714731-489689fd1ca8" },
+  { id: "tablets", name: "Планшеты", emoji: "📲", img: "1527698266440-12104e498b76" },
+  { id: "audio", name: "Аудио", emoji: "🎧", img: "1505740420928-5e560c06d30e" },
+  { id: "watches", name: "Умные часы", emoji: "⌚", img: "1546868871-7041f2a55e12" },
+  { id: "gaming", name: "Игры", emoji: "🎮", img: "1606144042614-b2417e99c4e3" },
+  { id: "photo", name: "Фото и видео", emoji: "📷", img: "1516035069371-29a1b244cc32" },
+  { id: "smarthome", name: "Умный дом", emoji: "🏠", img: "1519558260268-cde7e03a0152" },
+  { id: "accessories", name: "Аксессуары", emoji: "🔌", img: "1618384887929-16ec33fab9ef" }
 ];
+/** Фото с Unsplash (бесплатная лицензия): id → URL нужного размера */
+export const unsplash = (id, w = 640) => `https://images.unsplash.com/photo-${id}?w=${w}&q=70&auto=format&fit=crop`;
+
 export const categoryById = (id) => CATEGORIES.find(c => c.id === id) || { id, name: id, emoji: "📦" };
 
 export const SORTS = [

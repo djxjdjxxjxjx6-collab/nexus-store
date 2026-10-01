@@ -1,6 +1,6 @@
 // Главная: витрина + каталог с пагинацией, поиском, фильтрами (категория, скидка, цена), сортировкой и real-time
 import { mountLayout, $, $$, esc, money, productCard, skeletonCards, emptyState, toast, humanError, qs, getRecent, plural, debounce } from "../core/ui.js";
-import { CATEGORIES, SORTS, categoryById } from "../core/config.js";
+import { CATEGORIES, SORTS, categoryById, unsplash } from "../core/config.js";
 import { subscribeCatalog, fetchCatalogPage, countCatalog, fetchBestsellers, countByCategory, hasPriceRange } from "../db/products.js";
 import { bindProductGrid, paintFavs } from "../core/actions.js";
 
@@ -42,22 +42,22 @@ $("#app").innerHTML = `
       </div>
     </div>
     <div class="hero__visual" aria-hidden="true">
-      <div class="float-card float-card--1">📱<span>iPhone 16 Pro</span></div>
-      <div class="float-card float-card--2">🎧<span>−11%</span></div>
-      <div class="float-card float-card--3">💻<span>MacBook Air</span></div>
-      <div class="hero__emoji">⚡</div>
+      <img class="hero__photo" src="${unsplash("1511707171634-5f897ff02aa9", 900)}" alt="">
+      <div class="float-card float-card--1"><img src="${unsplash("1592750475338-74b7b21085ab", 120)}" alt=""><span>iPhone 16 Pro</span></div>
+      <div class="float-card float-card--2"><img src="${unsplash("1618366712010-f4ae9c647dcb", 120)}" alt=""><span>−11%</span></div>
+      <div class="float-card float-card--3"><img src="${unsplash("1517336714731-489689fd1ca8", 120)}" alt=""><span>MacBook Air</span></div>
     </div>
   </section>
 
   <section class="promo-row">
-    <a class="promo promo--a" href="index.html?cat=audio#catalog"><span>Аудио</span><b>Звук без проводов</b><em>🎧</em></a>
-    <a class="promo promo--b" href="index.html?cat=gaming#catalog"><span>Игры</span><b>Консоли и геймпады</b><em>🎮</em></a>
-    <a class="promo promo--c" href="index.html?cat=smarthome#catalog"><span>Умный дом</span><b>Автоматизируйте быт</b><em>🏠</em></a>
+    <a class="promo promo--a" href="index.html?cat=audio#catalog" style="--img:url('${unsplash("1505740420928-5e560c06d30e", 800)}')"><span>Аудио</span><b>Звук без проводов</b></a>
+    <a class="promo promo--b" href="index.html?cat=gaming#catalog" style="--img:url('${unsplash("1612287230202-1ff1d85d1bdf", 800)}')"><span>Игры</span><b>Консоли и геймпады</b></a>
+    <a class="promo promo--c" href="index.html?cat=smarthome#catalog" style="--img:url('${unsplash("1558317374-067fb5f30001", 800)}')"><span>Умный дом</span><b>Автоматизируйте быт</b></a>
   </section>
 
   <div class="section-title"><h2>Категории</h2></div>
   <section class="cat-tiles" id="catTiles">
-    ${CATEGORIES.map(c => `<a class="cat-tile" href="index.html?cat=${c.id}#catalog" data-cat="${c.id}"><span class="cat-tile__emoji">${c.emoji}</span><b>${esc(c.name)}</b><small data-count="${c.id}">&nbsp;</small></a>`).join("")}
+    ${CATEGORIES.map(c => `<a class="cat-tile" href="index.html?cat=${c.id}#catalog" data-cat="${c.id}"><span class="cat-tile__img"><img src="${unsplash(c.img, 240)}" alt="" loading="lazy"></span><b>${esc(c.name)}</b><small data-count="${c.id}">&nbsp;</small></a>`).join("")}
   </section>
 
   <div class="section-title"><h2>🔥 Хиты продаж</h2><span class="muted small">по количеству покупок</span></div>
